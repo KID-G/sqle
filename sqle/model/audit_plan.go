@@ -48,6 +48,7 @@ type AuditPlanSQLV2 struct {
 	FingerprintMD5 string `json:"fingerprint_md5" gorm:"column:fingerprint_md5;not null"`
 	SQLContent     string `json:"sql" gorm:"type:mediumtext;not null"`
 	Info           JSON   `gorm:"type:json"`
+	Schema         string `json:"schema" gorm:"type:varchar(512);not null"`
 }
 
 func (a AuditPlanSQLV2) TableName() string {
@@ -56,7 +57,7 @@ func (a AuditPlanSQLV2) TableName() string {
 
 func (a *AuditPlanSQLV2) GetFingerprintMD5() string {
 	if a.FingerprintMD5 != "" {
-		return a.GetFingerprintMD5()
+		return a.FingerprintMD5
 	}
 	return utils.Md5String(a.Fingerprint)
 }
@@ -166,10 +167,10 @@ ON DUPLICATE KEY UPDATE sql_content = VALUES(sql_content),
 func getBatchInsertRawSQL(auditPlanId uint, sqls []*AuditPlanSQLV2) (raw string, args []interface{}) {
 	pattern := make([]string, 0, len(sqls))
 	for _, sql := range sqls {
-		pattern = append(pattern, "(?, ?, ?, ?, ?)")
-		args = append(args, auditPlanId, sql.GetFingerprintMD5(), sql.Fingerprint, sql.SQLContent, sql.Info)
+		pattern = append(pattern, "(?, ?, ?, ?, ?, ?)")
+		args = append(args, auditPlanId, sql.GetFingerprintMD5(), sql.Fingerprint, sql.SQLContent, sql.Info, sql.Schema)
 	}
-	raw = fmt.Sprintf("INSERT INTO `audit_plan_sqls_v2` (`audit_plan_id`,`fingerprint_md5`, `fingerprint`, `sql_content`, `info`) VALUES %s",
+	raw = fmt.Sprintf("INSERT INTO `audit_plan_sqls_v2` (`audit_plan_id`,`fingerprint_md5`, `fingerprint`, `sql_content`, `info`, `schema`) VALUES %s",
 		strings.Join(pattern, ", "))
 	return
 }

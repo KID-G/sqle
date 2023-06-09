@@ -572,13 +572,16 @@ func GetSummaryOfWorkflowTasksV1(c echo.Context) error {
 }
 
 const (
-	taskDisplayStatusWaitForAudit     = "wait_for_audit"
-	taskDisplayStatusWaitForExecution = "wait_for_execution"
-	taskDisplayStatusExecFailed       = "exec_failed"
-	taskDisplayStatusExecSucceeded    = "exec_succeeded"
-	taskStatusManuallyExecuted        = "manually_executed"
-	taskDisplayStatusExecuting        = "executing"
-	taskDisplayStatusScheduled        = "exec_scheduled"
+	taskDisplayStatusWaitForAudit       = "wait_for_audit"
+	taskDisplayStatusWaitForExecution   = "wait_for_execution"
+	taskDisplayStatusExecFailed         = "exec_failed"
+	taskDisplayStatusExecSucceeded      = "exec_succeeded"
+	taskStatusManuallyExecuted          = "manually_executed"
+	taskDisplayStatusExecuting          = "executing"
+	taskDisplayStatusScheduled          = "exec_scheduled"
+	taskDisplayStatusTerminating        = "terminating"
+	taskDisplayStatusTerminateSucceeded = "terminate_succeeded"
+	taskDisplayStatusTerminateFailed    = "terminate_failed"
 )
 
 func GetTaskStatusRes(workflowStatus string, taskStatus string, scheduleAt *time.Time) (status string) {
@@ -601,6 +604,12 @@ func GetTaskStatusRes(workflowStatus string, taskStatus string, scheduleAt *time
 		return taskDisplayStatusExecuting
 	case model.TaskStatusManuallyExecuted:
 		return taskStatusManuallyExecuted
+	case model.TaskStatusTerminating:
+		return taskDisplayStatusTerminating
+	case model.TaskStatusTerminateSucc:
+		return taskDisplayStatusTerminateSucceeded
+	case model.TaskStatusTerminateFail:
+		return taskDisplayStatusTerminateFailed
 	}
 	return ""
 }
@@ -644,6 +653,7 @@ func CheckWorkflowCanCommit(template *model.WorkflowTemplate, tasks []*model.Tas
 
 type GetWorkflowsReqV1 struct {
 	FilterSubject                     string `json:"filter_subject" query:"filter_subject"`
+	FilterWorkflowID                  string `json:"filter_workflow_id" query:"filter_workflow_id"`
 	FilterCreateTimeFrom              string `json:"filter_create_time_from" query:"filter_create_time_from"`
 	FilterCreateTimeTo                string `json:"filter_create_time_to" query:"filter_create_time_to"`
 	FilterCreateUserName              string `json:"filter_create_user_name" query:"filter_create_user_name"`
@@ -761,6 +771,7 @@ func GetGlobalWorkflowsV1(c echo.Context) error {
 // @Id getWorkflowsV1
 // @Security ApiKeyAuth
 // @Param filter_subject query string false "filter subject"
+// @Param filter_workflow_id query string false "filter by workflow_id"
 // @Param filter_create_time_from query string false "filter create time from"
 // @Param filter_create_time_to query string false "filter create time to"
 // @Param filter_task_execute_start_time_from query string false "filter_task_execute_start_time_from"
@@ -807,6 +818,7 @@ func GetWorkflowsV1(c echo.Context) error {
 	}
 
 	data := map[string]interface{}{
+		"filter_workflow_id":                     req.FilterWorkflowID,
 		"filter_subject":                         req.FilterSubject,
 		"filter_create_time_from":                req.FilterCreateTimeFrom,
 		"filter_create_time_to":                  req.FilterCreateTimeTo,
@@ -995,9 +1007,43 @@ func ExportWorkflowV1(c echo.Context) error {
 // @Param workflow_id path string true "workflow id"
 // @Param project_name path string true "project name"
 // @Success 200 {object} controller.BaseRes
-// @Router /v2/projects/{project_name}/workflows/{workflow_id}/tasks/terminate [post]
+// @Router /v1/projects/{project_name}/workflows/{workflow_id}/tasks/terminate [post]
 func TerminateMultipleTaskByWorkflowV1(c echo.Context) error {
-	return controller.JSONNewNotImplementedErr(c)
+
+	projectName := c.Param("project_name")
+	workflowID := c.Param("workflow_id")
+	user, err := controller.GetCurrentUser(c)
+	if err != nil {
+		return controller.JSONBaseErrorReq(c, err)
+	}
+	s := model.GetStorage()
+
+	var workflow *model.Workflow
+	{
+		var exist bool
+		workflow, exist, err = s.GetWorkflowDetailByWorkflowID(projectName, workflowID)
+		if err != nil {
+			return controller.JSONBaseErrorReq(c, err)
+		}
+		if !exist {
+			return controller.JSONBaseErrorReq(c, ErrWorkflowNoAccess)
+		}
+	}
+
+	// check workflow permission
+	{
+		err = checkBeforeTasksTermination(c, projectName, workflow, user)
+		if err != nil {
+			return controller.JSONBaseErrorReq(c, err)
+		}
+	}
+
+	terminatingTaskIDs := getTerminatingTaskIDs(s, workflow, user.ID)
+
+	err = s.UpdateTaskStatusByIDs(terminatingTaskIDs,
+		map[string]string{"status": model.TaskStatusTerminating})
+
+	return c.JSON(http.StatusOK, controller.NewBaseReq(err))
 }
 
 // TerminateSingleTaskByWorkflowV1
@@ -1010,7 +1056,105 @@ func TerminateMultipleTaskByWorkflowV1(c echo.Context) error {
 // @Param project_name path string true "project name"
 // @Param task_id path string true "task id"
 // @Success 200 {object} controller.BaseRes
-// @Router /v2/projects/{project_name}/workflows/{workflow_id}/tasks/{task_id}/terminate [post]
+// @Router /v1/projects/{project_name}/workflows/{workflow_id}/tasks/{task_id}/terminate [post]
 func TerminateSingleTaskByWorkflowV1(c echo.Context) error {
-	return controller.JSONNewNotImplementedErr(c)
+	projectName := c.Param("project_name")
+	workflowID := c.Param("workflow_id")
+	taskIDStr := c.Param("task_id")
+	taskID, err := strconv.Atoi(taskIDStr)
+	if err != nil {
+		return controller.JSONBaseErrorReq(c, err)
+	}
+	user, err := controller.GetCurrentUser(c)
+	if err != nil {
+		return controller.JSONBaseErrorReq(c, err)
+	}
+	s := model.GetStorage()
+
+	var workflow *model.Workflow
+	{
+		var exist bool
+		workflow, exist, err = s.GetWorkflowDetailByWorkflowID(projectName, workflowID)
+		if err != nil {
+			return controller.JSONBaseErrorReq(c, err)
+		}
+		if !exist {
+			return controller.JSONBaseErrorReq(c, ErrWorkflowNoAccess)
+		}
+	}
+
+	// check workflow permission
+	{
+		err := checkBeforeTasksTermination(c, projectName, workflow, user)
+		if err != nil {
+			return controller.JSONBaseErrorReq(c, err)
+		}
+	}
+
+	// check task
+	{
+		ok, err := isTaskCanBeTerminate(s, taskIDStr)
+		if err != nil {
+			return controller.JSONBaseErrorReq(c, err)
+		}
+		if !ok {
+			return controller.JSONBaseErrorReq(c,
+				fmt.Errorf("task can not be terminated. taskId=%v workflowId=%v", taskID, workflowID))
+		}
+	}
+
+	err = s.UpdateTaskStatusByIDs([]uint{uint(taskID)},
+		map[string]string{"status": model.TaskStatusTerminating})
+
+	return c.JSON(http.StatusOK, controller.NewBaseReq(err))
+}
+
+func checkBeforeTasksTermination(c echo.Context, projectName string,
+	workflow *model.Workflow, user *model.User) error {
+
+	if workflow.Record.Status != model.WorkflowStatusExecuting {
+		return errors.NewDataInvalidErr(
+			"workflow status is %s, termination can not be performed",
+			workflow.Record.Status)
+	}
+
+	err := CheckCurrentUserCanOperateWorkflow(c,
+		&model.Project{Name: projectName}, workflow, []uint{model.OP_WORKFLOW_EXECUTE})
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func isTaskCanBeTerminate(s *model.Storage, taskID string) (bool, error) {
+	task, exist, err := s.GetTaskById(taskID)
+	if err != nil {
+		return false, fmt.Errorf("get task by id failed. taskID=%v err=%v", taskID, err)
+	}
+	if !exist {
+		return false, fmt.Errorf("task not exist. taskID=%v", taskID)
+	}
+	if task.Instance == nil {
+		return false, fmt.Errorf("task instance is nil. taskID=%v", taskID)
+	}
+
+	if task.Status == model.TaskStatusExecuting {
+		return true, nil
+	}
+
+	return false, nil
+}
+
+func getTerminatingTaskIDs(s *model.Storage, workflow *model.Workflow, userID uint) (
+	taskIDs []uint) {
+
+	taskIDs = make([]uint, 0)
+	for i := range workflow.Record.InstanceRecords {
+		instRecord := workflow.Record.InstanceRecords[i]
+		if instRecord.Task.Status == model.TaskStatusExecuting {
+			taskIDs = append(taskIDs, instRecord.TaskId)
+		}
+	}
+	return taskIDs
 }

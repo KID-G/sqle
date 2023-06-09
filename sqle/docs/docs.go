@@ -4265,6 +4265,12 @@ var doc = `{
                     },
                     {
                         "type": "string",
+                        "description": "filter by workflow_id",
+                        "name": "filter_workflow_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "filter create time from",
                         "name": "filter_create_time_from",
                         "in": "query"
@@ -4572,6 +4578,91 @@ var doc = `{
                         "description": "export workflow",
                         "schema": {
                             "type": "file"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/projects/{project_name}/workflows/{workflow_id}/tasks/terminate": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "terminate multiple task by project and workflow",
+                "tags": [
+                    "workflow"
+                ],
+                "summary": "终止工单下多个上线任务",
+                "operationId": "terminateMultipleTaskByWorkflowV1",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "workflow id",
+                        "name": "workflow_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "project name",
+                        "name": "project_name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/controller.BaseRes"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/projects/{project_name}/workflows/{workflow_id}/tasks/{task_id}/terminate": {
+            "post": {
+                "security": [
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "execute one task on workflow",
+                "tags": [
+                    "workflow"
+                ],
+                "summary": "终止单个上线任务",
+                "operationId": "terminateSingleTaskByWorkflowV1",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "workflow id",
+                        "name": "workflow_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "project name",
+                        "name": "project_name",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "task id",
+                        "name": "task_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/controller.BaseRes"
                         }
                     }
                 }
@@ -7674,7 +7765,7 @@ var doc = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/controller.BaseRes"
+                            "$ref": "#/definitions/v2.CreateWorkflowResV2"
                         }
                     }
                 }
@@ -8071,45 +8162,6 @@ var doc = `{
                 }
             }
         },
-        "/v2/projects/{project_name}/workflows/{workflow_id}/tasks/terminate": {
-            "post": {
-                "security": [
-                    {
-                        "ApiKeyAuth": []
-                    }
-                ],
-                "description": "terminate multiple task by project and workflow",
-                "tags": [
-                    "workflow"
-                ],
-                "summary": "终止工单下多个上线任务",
-                "operationId": "terminateMultipleTaskByWorkflowV1",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "workflow id",
-                        "name": "workflow_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "project name",
-                        "name": "project_name",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/controller.BaseRes"
-                        }
-                    }
-                }
-            }
-        },
         "/v2/projects/{project_name}/workflows/{workflow_id}/tasks/{task_id}/execute": {
             "post": {
                 "security": [
@@ -8217,52 +8269,6 @@ var doc = `{
                 }
             }
         },
-        "/v2/projects/{project_name}/workflows/{workflow_id}/tasks/{task_id}/terminate": {
-            "post": {
-                "security": [
-                    {
-                        "ApiKeyAuth": []
-                    }
-                ],
-                "description": "execute one task on workflow",
-                "tags": [
-                    "workflow"
-                ],
-                "summary": "终止单个上线任务",
-                "operationId": "terminateSingleTaskByWorkflowV1",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "workflow id",
-                        "name": "workflow_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "project name",
-                        "name": "project_name",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "task id",
-                        "name": "task_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/controller.BaseRes"
-                        }
-                    }
-                }
-            }
-        },
         "/v2/sql_audit": {
             "post": {
                 "security": [
@@ -8324,7 +8330,10 @@ var doc = `{
                             "doing",
                             "succeeded",
                             "failed",
-                            "manually_executed"
+                            "manually_executed",
+                            "terminating",
+                            "terminate_succeeded",
+                            "terminate_failed"
                         ],
                         "type": "string",
                         "description": "filter: exec status of task sql",
@@ -12351,6 +12360,9 @@ var doc = `{
                 "enable_smtp_notify": {
                     "type": "boolean"
                 },
+                "is_skip_verify": {
+                    "type": "boolean"
+                },
                 "smtp_host": {
                     "type": "string"
                 },
@@ -13123,6 +13135,9 @@ var doc = `{
             "type": "object",
             "properties": {
                 "enable_smtp_notify": {
+                    "type": "boolean"
+                },
+                "is_skip_verify": {
                     "type": "boolean"
                 },
                 "smtp_host": {
@@ -14172,6 +14187,31 @@ var doc = `{
                 }
             }
         },
+        "v2.CreateWorkflowResV2": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "integer",
+                    "example": 0
+                },
+                "data": {
+                    "type": "object",
+                    "$ref": "#/definitions/v2.CreateWorkflowResV2Data"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "ok"
+                }
+            }
+        },
+        "v2.CreateWorkflowResV2Data": {
+            "type": "object",
+            "properties": {
+                "workflow_id": {
+                    "type": "string"
+                }
+            }
+        },
         "v2.DirectAuditReqV2": {
             "type": "object",
             "properties": {
@@ -14437,7 +14477,10 @@ var doc = `{
                         "exec_failed",
                         "exec_succeeded",
                         "executing",
-                        "manually_executed"
+                        "manually_executed",
+                        "terminating",
+                        "terminate_succeeded",
+                        "terminate_failed"
                     ]
                 },
                 "task_id": {

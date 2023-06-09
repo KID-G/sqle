@@ -504,7 +504,7 @@ type GetWorkflowTasksResV2 struct {
 type GetWorkflowTasksItemV2 struct {
 	TaskId                   uint                       `json:"task_id"`
 	InstanceName             string                     `json:"instance_name"`
-	Status                   string                     `json:"status" enums:"wait_for_audit,wait_for_execution,exec_scheduled,exec_failed,exec_succeeded,executing,manually_executed"`
+	Status                   string                     `json:"status" enums:"wait_for_audit,wait_for_execution,exec_scheduled,exec_failed,exec_succeeded,executing,manually_executed,terminating,terminate_succeeded,terminate_failed"`
 	ExecStartTime            *time.Time                 `json:"exec_start_time,omitempty"`
 	ExecEndTime              *time.Time                 `json:"exec_end_time,omitempty"`
 	ScheduleTime             *time.Time                 `json:"schedule_time,omitempty"`
@@ -534,6 +534,22 @@ func GetSummaryOfWorkflowTasksV2(c echo.Context) error {
 	}
 
 	s := model.GetStorage()
+	user, err := controller.GetCurrentUser(c)
+	if err != nil {
+		return err
+	}
+
+	// TODO: Code logic optimization
+	instances, err := s.GetUserCanOpInstancesFromProject(user, projectName, []uint{model.OP_WORKFLOW_EXECUTE})
+	if err != nil {
+		return controller.JSONBaseErrorReq(c, err)
+	}
+	instanceMap := make(map[string]string)
+	for i := range instances {
+		inst := instances[i]
+		instanceMap[inst.Name] = user.Name
+	}
+
 	queryData := map[string]interface{}{
 		"workflow_id":  workflowId,
 		"project_name": projectName,
@@ -546,14 +562,15 @@ func GetSummaryOfWorkflowTasksV2(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, &GetWorkflowTasksResV2{
 		BaseRes: controller.NewBaseReq(nil),
-		Data:    convertWorkflowToTasksSummaryRes(taskDetails),
+		Data:    convertWorkflowToTasksSummaryRes(taskDetails, instanceMap),
 	})
 }
 
-func convertWorkflowToTasksSummaryRes(taskDetails []*model.WorkflowTasksSummaryDetail) []*GetWorkflowTasksItemV2 {
+func convertWorkflowToTasksSummaryRes(taskDetails []*model.WorkflowTasksSummaryDetail, instanceMap map[string]string) []*GetWorkflowTasksItemV2 {
 	res := make([]*GetWorkflowTasksItemV2, len(taskDetails))
 
 	for i, taskDetail := range taskDetails {
+
 		res[i] = &GetWorkflowTasksItemV2{
 			TaskId:                   taskDetail.TaskId,
 			InstanceName:             utils.AddDelTag(taskDetail.InstanceDeletedAt, taskDetail.InstanceName),
@@ -567,6 +584,11 @@ func convertWorkflowToTasksSummaryRes(taskDetails []*model.WorkflowTasksSummaryD
 			InstanceMaintenanceTimes: v1.ConvertPeriodToMaintenanceTimeResV1(taskDetail.InstanceMaintenancePeriod),
 			ExecutionUserName:        utils.AddDelTag(taskDetail.ExecutionUserDeletedAt, taskDetail.ExecutionUserName),
 		}
+
+		// NOTE: 当 SQL 处于上线中时，CurrentStepAssigneeUser 可能为空。此处需要「拥有上线权限的用户」
+		if taskDetail.TaskStatus == model.TaskStatusExecuting {
+			res[i].CurrentStepAssigneeUser = []string{instanceMap[taskDetail.InstanceName]}
+		}
 	}
 	return res
 }
@@ -575,6 +597,15 @@ type CreateWorkflowReqV2 struct {
 	Subject string `json:"workflow_subject" form:"workflow_subject" valid:"required,name"`
 	Desc    string `json:"desc" form:"desc"`
 	TaskIds []uint `json:"task_ids" form:"task_ids" valid:"required"`
+}
+
+type CreateWorkflowResV2 struct {
+	controller.BaseRes
+	Data *CreateWorkflowResV2Data `json:"data"`
+}
+
+type CreateWorkflowResV2Data struct {
+	WorkflowID string `json:"workflow_id"`
 }
 
 // CreateWorkflowV2
@@ -587,7 +618,7 @@ type CreateWorkflowReqV2 struct {
 // @Security ApiKeyAuth
 // @Param instance body v2.CreateWorkflowReqV2 true "create workflow request"
 // @Param project_name path string true "project name"
-// @Success 200 {object} controller.BaseRes
+// @Success 200 {object} CreateWorkflowResV2
 // @router /v2/projects/{project_name}/workflows [post]
 func CreateWorkflowV2(c echo.Context) error {
 	req := new(CreateWorkflowReqV2)
@@ -734,7 +765,12 @@ func CreateWorkflowV2(c echo.Context) error {
 
 	go im.CreateApprove(workFlowId)
 
-	return c.JSON(http.StatusOK, controller.NewBaseReq(nil))
+	return c.JSON(http.StatusOK, &CreateWorkflowResV2{
+		BaseRes: controller.NewBaseReq(nil),
+		Data: &CreateWorkflowResV2Data{
+			WorkflowID: workflow.WorkflowId,
+		},
+	})
 }
 
 type UpdateWorkflowReqV2 struct {

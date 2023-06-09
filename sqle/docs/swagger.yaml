@@ -2678,6 +2678,8 @@ definitions:
     properties:
       enable_smtp_notify:
         type: boolean
+      is_skip_verify:
+        type: boolean
       smtp_host:
         type: string
       smtp_port:
@@ -3198,6 +3200,8 @@ definitions:
   v1.UpdateSMTPConfigurationReqV1:
     properties:
       enable_smtp_notify:
+        type: boolean
+      is_skip_verify:
         type: boolean
       smtp_host:
         example: smtp.email.qq.com
@@ -3903,6 +3907,23 @@ definitions:
       workflow_subject:
         type: string
     type: object
+  v2.CreateWorkflowResV2:
+    properties:
+      code:
+        example: 0
+        type: integer
+      data:
+        $ref: '#/definitions/v2.CreateWorkflowResV2Data'
+        type: object
+      message:
+        example: ok
+        type: string
+    type: object
+  v2.CreateWorkflowResV2Data:
+    properties:
+      workflow_id:
+        type: string
+    type: object
   v2.DirectAuditReqV2:
     properties:
       instance_type:
@@ -4089,6 +4110,9 @@ definitions:
         - exec_succeeded
         - executing
         - manually_executed
+        - terminating
+        - terminate_succeeded
+        - terminate_failed
         type: string
       task_id:
         type: integer
@@ -7012,6 +7036,10 @@ paths:
         in: query
         name: filter_subject
         type: string
+      - description: filter by workflow_id
+        in: query
+        name: filter_workflow_id
+        type: string
       - description: filter create time from
         in: query
         name: filter_create_time_from
@@ -7105,6 +7133,61 @@ paths:
       security:
       - ApiKeyAuth: []
       summary: 创建工单
+      tags:
+      - workflow
+  /v1/projects/{project_name}/workflows/{workflow_id}/tasks/{task_id}/terminate:
+    post:
+      description: execute one task on workflow
+      operationId: terminateSingleTaskByWorkflowV1
+      parameters:
+      - description: workflow id
+        in: path
+        name: workflow_id
+        required: true
+        type: string
+      - description: project name
+        in: path
+        name: project_name
+        required: true
+        type: string
+      - description: task id
+        in: path
+        name: task_id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/controller.BaseRes'
+      security:
+      - ApiKeyAuth: []
+      summary: 终止单个上线任务
+      tags:
+      - workflow
+  /v1/projects/{project_name}/workflows/{workflow_id}/tasks/terminate:
+    post:
+      description: terminate multiple task by project and workflow
+      operationId: terminateMultipleTaskByWorkflowV1
+      parameters:
+      - description: workflow id
+        in: path
+        name: workflow_id
+        required: true
+        type: string
+      - description: project name
+        in: path
+        name: project_name
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/controller.BaseRes'
+      security:
+      - ApiKeyAuth: []
+      summary: 终止工单下多个上线任务
       tags:
       - workflow
   /v1/projects/{project_name}/workflows/{workflow_name}/:
@@ -9214,7 +9297,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/controller.BaseRes'
+            $ref: '#/definitions/v2.CreateWorkflowResV2'
       security:
       - ApiKeyAuth: []
       summary: 创建工单
@@ -9465,36 +9548,6 @@ paths:
       summary: 设置工单数据源定时上线时间（设置为空则代表取消定时时间，需要SQL审核流程都通过后才可以设置）
       tags:
       - workflow
-  /v2/projects/{project_name}/workflows/{workflow_id}/tasks/{task_id}/terminate:
-    post:
-      description: execute one task on workflow
-      operationId: terminateSingleTaskByWorkflowV1
-      parameters:
-      - description: workflow id
-        in: path
-        name: workflow_id
-        required: true
-        type: string
-      - description: project name
-        in: path
-        name: project_name
-        required: true
-        type: string
-      - description: task id
-        in: path
-        name: task_id
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/controller.BaseRes'
-      security:
-      - ApiKeyAuth: []
-      summary: 终止单个上线任务
-      tags:
-      - workflow
   /v2/projects/{project_name}/workflows/{workflow_id}/tasks/execute:
     post:
       description: execute tasks on workflow
@@ -9518,31 +9571,6 @@ paths:
       security:
       - ApiKeyAuth: []
       summary: 多数据源批量上线
-      tags:
-      - workflow
-  /v2/projects/{project_name}/workflows/{workflow_id}/tasks/terminate:
-    post:
-      description: terminate multiple task by project and workflow
-      operationId: terminateMultipleTaskByWorkflowV1
-      parameters:
-      - description: workflow id
-        in: path
-        name: workflow_id
-        required: true
-        type: string
-      - description: project name
-        in: path
-        name: project_name
-        required: true
-        type: string
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/controller.BaseRes'
-      security:
-      - ApiKeyAuth: []
-      summary: 终止工单下多个上线任务
       tags:
       - workflow
   /v2/projects/{project_name}/workflows/cancel:
@@ -9636,6 +9664,9 @@ paths:
         - succeeded
         - failed
         - manually_executed
+        - terminating
+        - terminate_succeeded
+        - terminate_failed
         in: query
         name: filter_exec_status
         type: string
